@@ -1,31 +1,12 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
- 
-/// <summary>
-/// Controlador de personaje para side-scroller 2D.
-/// Compatible con el nuevo Input System de Unity.
-/// Requiere: Rigidbody2D, Collider2D, Animator, PlayerInput en el mismo GameObject.
-///
-/// Parámetros del Animator necesarios:
-///   - isWalking        (bool)
-///   - isGrounded       (bool)
-///   - isDoubleJumping  (trigger)
-///   - isDead           (bool)
-///   - yVelocity        (float) → opcional
-///
-/// En el componente PlayerInput:
-///   - Behavior: Send Messages  ← importante
-///   - Actions: Move (Value, Vector2) y Jump (Button)
-/// </summary>
+
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Animator))]
 [RequireComponent(typeof(PlayerInput))]
 public class PlayerController2D : MonoBehaviour
 {
-    // ─────────────────────────────────────────
-    //  INSPECTOR
-    // ─────────────────────────────────────────
- 
+    
     [Header("Movimiento")]
     [SerializeField] private float moveSpeed = 6f;
  
@@ -39,42 +20,34 @@ public class PlayerController2D : MonoBehaviour
     [SerializeField] private float groundCheckRadius = 0.15f;
     [SerializeField] private LayerMask groundLayer;
  
+    [Header("Detección de pared")]
+    [SerializeField] private Transform wallCheck;   
+    [SerializeField] private float wallCheckRadius = 0.15f;
+ 
     [Header("Doble Salto (Power-Up)")]
     [SerializeField] private bool canDoubleJump = false;
  
     [Header("Flip")]
     [SerializeField] private bool useSpriteFlip = true;
  
-    // ─────────────────────────────────────────
-    //  REFERENCIAS PRIVADAS
-    // ─────────────────────────────────────────
- 
     private Rigidbody2D rb;
     private Animator anim;
     private SpriteRenderer spriteRenderer;
  
-    // ─────────────────────────────────────────
-    //  ESTADO
-    // ─────────────────────────────────────────
- 
     private bool isGrounded;
+    private bool isTouchingWall;
     private bool hasDoubleJump;
     private bool isDead;
     private float horizontalInput;
-    private bool jumpPressed;       // se activa en OnJump, se consume en Update
-    private bool jumpHeld;          // true mientras el botón esté apretado
- 
-    // Nombres de parámetros del Animator
+    private bool jumpPressed;
+    private bool jumpHeld;
+
     private const string ParamIsWalking       = "isWalking";
     private const string ParamIsGrounded      = "isGrounded";
     private const string ParamIsDoubleJumping = "isDoubleJumping";
     private const string ParamIsDead          = "isDead";
     private const string ParamYVelocity       = "yVelocity";
- 
-    // ─────────────────────────────────────────
-    //  UNITY CALLBACKS
-    // ─────────────────────────────────────────
- 
+    
     private void Awake()
     {
         rb             = GetComponent<Rigidbody2D>();
@@ -96,30 +69,23 @@ public class PlayerController2D : MonoBehaviour
         if (isDead) return;
  
         CheckGround();
+        CheckWall();
         Move();
         ApplyBetterJumpPhysics();
     }
- 
-    // ─────────────────────────────────────────
-    //  CALLBACKS DEL INPUT SYSTEM
-    //  (PlayerInput con Behavior: Send Messages
-    //   llama a estos métodos automáticamente)
-    // ─────────────────────────────────────────
- 
-    // Se llama cuando cambia el eje de movimiento
+    
     private void OnMove(InputValue value)
     {
         horizontalInput = value.Get<Vector2>().x;
     }
  
-    // Se llama al presionar/soltar el botón Jump
     private void OnJump(InputValue value)
     {
         if (isDead) return;
  
         if (value.isPressed)
         {
-            jumpPressed = true;   // consumido en HandleJump()
+            jumpPressed = true;
             jumpHeld    = true;
         }
         else
@@ -127,24 +93,27 @@ public class PlayerController2D : MonoBehaviour
             jumpHeld = false;
         }
     }
- 
-    // ─────────────────────────────────────────
-    //  MOVIMIENTO
-    // ─────────────────────────────────────────
- 
+
     private void Move()
     {
+
+        if (!isGrounded && isTouchingWall && horizontalInput != 0)
+        {
+            float wallDirection = wallCheck.localPosition.x > 0 ? 1f : -1f;
+            if (Mathf.Sign(horizontalInput) == wallDirection)
+            {
+                rb.linearVelocity = new Vector2(0f, rb.linearVelocity.y);
+                return;
+            }
+        }
+ 
         rb.linearVelocity = new Vector2(horizontalInput * moveSpeed, rb.linearVelocity.y);
     }
- 
-    // ─────────────────────────────────────────
-    //  SALTO Y DOBLE SALTO
-    // ─────────────────────────────────────────
  
     private void HandleJump()
     {
         if (!jumpPressed) return;
-        jumpPressed = false;   // consumir el evento
+        jumpPressed = false;
  
         if (isGrounded)
         {
@@ -169,19 +138,13 @@ public class PlayerController2D : MonoBehaviour
     {
         if (rb.linearVelocity.y < 0)
         {
-            // Caída más pesada
             rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
         }
         else if (rb.linearVelocity.y > 0 && !jumpHeld)
         {
-            // Salto corto si soltaste el botón
             rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
         }
     }
- 
-    // ─────────────────────────────────────────
-    //  DETECCIÓN DE SUELO
-    // ─────────────────────────────────────────
  
     private void CheckGround()
     {
@@ -192,10 +155,12 @@ public class PlayerController2D : MonoBehaviour
             hasDoubleJump = true;
     }
  
-    // ─────────────────────────────────────────
-    //  FLIP DEL SPRITE
-    // ─────────────────────────────────────────
- 
+    private void CheckWall()
+    {
+        if (wallCheck == null) return;
+        isTouchingWall = Physics2D.OverlapCircle(wallCheck.position, wallCheckRadius, groundLayer);
+    }
+    
     private void FlipSprite()
     {
         if (horizontalInput == 0) return;
@@ -210,22 +175,21 @@ public class PlayerController2D : MonoBehaviour
             scale.x = Mathf.Abs(scale.x) * (horizontalInput < 0 ? -1 : 1);
             transform.localScale = scale;
         }
+        
+        if (wallCheck != null)
+        {
+            Vector3 pos = wallCheck.localPosition;
+            pos.x = Mathf.Abs(pos.x) * (horizontalInput < 0 ? -1 : 1);
+            wallCheck.localPosition = pos;
+        }
     }
- 
-    // ─────────────────────────────────────────
-    //  ANIMATOR
-    // ─────────────────────────────────────────
- 
+
     private void UpdateAnimator()
     {
         anim.SetBool(ParamIsWalking,  horizontalInput != 0 && isGrounded);
         anim.SetBool(ParamIsGrounded, isGrounded);
         anim.SetFloat(ParamYVelocity, rb.linearVelocity.y);
     }
- 
-    // ─────────────────────────────────────────
-    //  MUERTE
-    // ─────────────────────────────────────────
  
     public void Die()
     {
@@ -236,12 +200,34 @@ public class PlayerController2D : MonoBehaviour
         rb.bodyType = RigidbodyType2D.Static;
  
         anim.SetBool(ParamIsDead, true);
-        Debug.Log("Player ha muerto.");
+        
+        if (RespawnManager.Instance != null)
+            RespawnManager.Instance.StartRespawn();
+        else
+            Debug.LogWarning("PlayerController2D: no hay un RespawnManager en la escena.");
     }
- 
-    // ─────────────────────────────────────────
-    //  POWER-UP: DOBLE SALTO
-    // ─────────────────────────────────────────
+
+    public void Respawn()
+    {
+        isDead          = false;
+        isGrounded      = false;
+        hasDoubleJump   = false;
+        jumpPressed     = false;
+        jumpHeld        = false;
+        horizontalInput = 0f;
+
+        rb.bodyType       = RigidbodyType2D.Dynamic;
+        rb.linearVelocity = Vector2.zero;
+
+        // Primero apagar isDead ANTES de cambiar el estado del Animator
+        anim.SetBool(ParamIsDead,     false);
+        anim.SetBool(ParamIsWalking,  false);
+        anim.SetBool(ParamIsGrounded, false);
+
+        // Forzar la transición al estado Idle desde la capa 0
+        anim.Play("Idle", 0, 0f);
+        anim.Update(0f); // forzar que el Animator procese el cambio en este frame
+    }
  
     public void EnableDoubleJump()
     {
@@ -256,14 +242,18 @@ public class PlayerController2D : MonoBehaviour
         hasDoubleJump = false;
     }
  
-    // ─────────────────────────────────────────
-    //  GIZMOS
-    // ─────────────────────────────────────────
- 
     private void OnDrawGizmosSelected()
     {
-        if (groundCheck == null) return;
-        Gizmos.color = isGrounded ? Color.green : Color.red;
-        Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        if (groundCheck != null)
+        {
+            Gizmos.color = isGrounded ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(groundCheck.position, groundCheckRadius);
+        }
+ 
+        if (wallCheck != null)
+        {
+            Gizmos.color = isTouchingWall ? Color.blue : Color.cyan;
+            Gizmos.DrawWireSphere(wallCheck.position, wallCheckRadius);
+        }
     }
 }
