@@ -1,13 +1,13 @@
 using UnityEngine;
-
+ 
 /// <summary>
-/// Sierra circular que se mueve en ida y vuelta entre dos puntos.
-/// Mata al jugador al tocarlo.
+/// Sierra circular que se mueve en ida y vuelta en cualquier dirección,
+/// incluyendo diagonal con ángulo graduable.
 ///
 /// Configuración en el Inspector:
 ///   - Move Distance  → distancia total que recorre desde su posición inicial
 ///   - Move Speed     → velocidad de movimiento
-///   - Move Direction → eje de movimiento (horizontal o vertical)
+///   - Angle          → ángulo en grados (0 = derecha, 90 = arriba, 45 = diagonal)
 ///
 /// El GameObject necesita:
 ///   - Collider2D con Is Trigger: ON
@@ -15,59 +15,71 @@ using UnityEngine;
 /// </summary>
 public class CircularSaw : MonoBehaviour
 {
-    public enum Direction { Horizontal, Vertical }
-
     [Header("Movimiento")]
     [SerializeField] private float moveDistance = 4f;
     [SerializeField] private float moveSpeed    = 3f;
-    [SerializeField] private Direction moveDirection = Direction.Horizontal;
-
+ 
+    [Header("Dirección")]
+    [Range(0f, 360f)]
+    [SerializeField] private float angle = 0f;
+    // 0°   = derecha
+    // 90°  = arriba
+    // 180° = izquierda
+    // 270° = abajo
+    // 45°  = diagonal arriba-derecha
+    // 135° = diagonal arriba-izquierda
+ 
     private Vector3 startPosition;
     private Vector3 endPosition;
     private bool goingForward = true;
-
+ 
     private void Start()
     {
         startPosition = transform.position;
-
-        // Calcular el punto de destino según la dirección elegida
-        if (moveDirection == Direction.Horizontal)
-            endPosition = startPosition + Vector3.right * moveDistance;
-        else
-            endPosition = startPosition + Vector3.up * moveDistance;
+        endPosition   = startPosition + DirectionFromAngle() * moveDistance;
     }
-
+ 
     private void Update()
     {
-        // Mover hacia el destino actual
         Vector3 target = goingForward ? endPosition : startPosition;
         transform.position = Vector3.MoveTowards(transform.position, target, moveSpeed * Time.deltaTime);
-
-        // Cambiar dirección al llegar al destino
+ 
         if (Vector3.Distance(transform.position, target) < 0.01f)
             goingForward = !goingForward;
     }
-
+ 
+    /// <summary>
+    /// Convierte el ángulo en grados a un vector de dirección normalizado.
+    /// </summary>
+    private Vector3 DirectionFromAngle()
+    {
+        float rad = angle * Mathf.Deg2Rad;
+        return new Vector3(Mathf.Cos(rad), Mathf.Sin(rad), 0f);
+    }
+ 
     private void OnTriggerEnter2D(Collider2D other)
     {
         if (!other.CompareTag("Player")) return;
-
+ 
         PlayerController2D player = other.GetComponent<PlayerController2D>();
         if (player != null)
             player.Die();
     }
-
-    // Dibuja el recorrido en el editor
+ 
+    // Dibuja el recorrido en el editor y se actualiza en tiempo real al cambiar el ángulo
     private void OnDrawGizmos()
     {
-        Vector3 origin = Application.isPlaying ? startPosition : transform.position;
-        Vector3 end    = moveDirection == Direction.Horizontal
-            ? origin + Vector3.right * moveDistance
-            : origin + Vector3.up   * moveDistance;
-
+        Vector3 origin    = Application.isPlaying ? startPosition : transform.position;
+        Vector3 direction = DirectionFromAngle();
+        Vector3 end       = origin + direction * moveDistance;
+ 
         Gizmos.color = Color.red;
         Gizmos.DrawLine(origin, end);
         Gizmos.DrawWireSphere(origin, 0.15f);
         Gizmos.DrawWireSphere(end,    0.15f);
+ 
+        // Flecha indicando la dirección inicial
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawLine(origin, origin + direction * 0.4f);
     }
 }
