@@ -22,10 +22,8 @@ public class CircularSaw : MonoBehaviour
     [Header("Dirección")]
     [Range(0f, 360f)]
     [SerializeField] private float angle = 0f;
-    // 0°   = derecha
-    // 90°  = arriba
-    // 180° = izquierda
-    // 270° = abajo
+    // 0°   = derecha      180° = izquierda
+    // 90°  = arriba       270° = abajo
     // 45°  = diagonal arriba-derecha
     // 135° = diagonal arriba-izquierda
  
@@ -33,28 +31,28 @@ public class CircularSaw : MonoBehaviour
     private Vector3 endPosition;
     private bool goingForward = true;
  
+    // Caché: umbral al cuadrado para evitar sqrt en el chequeo de llegada
+    private const float ArrivalThresholdSqr = 0.01f * 0.01f;
+ 
     private void Start()
     {
         startPosition = transform.position;
-        endPosition   = startPosition + DirectionFromAngle() * moveDistance;
+ 
+        // DirectionFromAngle se llama una sola vez en Start, no cada frame
+        endPosition = startPosition + DirectionFromAngle() * moveDistance;
     }
  
     private void Update()
     {
         Vector3 target = goingForward ? endPosition : startPosition;
-        transform.position = Vector3.MoveTowards(transform.position, target, moveSpeed * Time.deltaTime);
  
-        if (Vector3.Distance(transform.position, target) < 0.01f)
+        // Cachear moveSpeed * deltaTime para no multiplicarlo dos veces
+        float step = moveSpeed * Time.deltaTime;
+        transform.position = Vector3.MoveTowards(transform.position, target, step);
+ 
+        // sqrMagnitude en lugar de Vector3.Distance (evita raíz cuadrada)
+        if ((transform.position - target).sqrMagnitude < ArrivalThresholdSqr)
             goingForward = !goingForward;
-    }
- 
-    /// <summary>
-    /// Convierte el ángulo en grados a un vector de dirección normalizado.
-    /// </summary>
-    private Vector3 DirectionFromAngle()
-    {
-        float rad = angle * Mathf.Deg2Rad;
-        return new Vector3(Mathf.Cos(rad), Mathf.Sin(rad), 0f);
     }
  
     private void OnTriggerEnter2D(Collider2D other)
@@ -66,7 +64,17 @@ public class CircularSaw : MonoBehaviour
             player.Die();
     }
  
-    // Dibuja el recorrido en el editor y se actualiza en tiempo real al cambiar el ángulo
+    /// <summary>
+    /// Convierte el ángulo en grados a un vector de dirección normalizado.
+    /// Solo se llama en Start y en OnDrawGizmos (editor), nunca en Update.
+    /// </summary>
+    private Vector3 DirectionFromAngle()
+    {
+        float rad = angle * Mathf.Deg2Rad;
+        return new Vector3(Mathf.Cos(rad), Mathf.Sin(rad), 0f);
+    }
+ 
+    // Dibuja el recorrido en el editor
     private void OnDrawGizmos()
     {
         Vector3 origin    = Application.isPlaying ? startPosition : transform.position;
@@ -78,7 +86,6 @@ public class CircularSaw : MonoBehaviour
         Gizmos.DrawWireSphere(origin, 0.15f);
         Gizmos.DrawWireSphere(end,    0.15f);
  
-        // Flecha indicando la dirección inicial
         Gizmos.color = Color.yellow;
         Gizmos.DrawLine(origin, origin + direction * 0.4f);
     }

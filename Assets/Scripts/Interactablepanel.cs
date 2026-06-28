@@ -25,15 +25,22 @@ public class InteractablePanel : MonoBehaviour
     private Transform player;
     private bool activated = false;
  
-    // Acción del Input System
+    // Caché: rango al cuadrado para evitar sqrt cada frame
+    private float sqrInteractionRange;
+ 
+    // Caché: posición del panel (no se mueve)
+    private Vector3 cachedPosition;
+ 
     private InputAction interactAction;
  
     private void Awake()
     {
         anim = GetComponent<Animator>();
  
-        // Crear la acción de interacción directamente por código
-        // Bindings: tecla E en teclado, botón Oeste (cuadrado/X) en gamepad
+        // Precalcular rango al cuadrado una sola vez
+        sqrInteractionRange = interactionRange * interactionRange;
+        cachedPosition      = transform.position;
+ 
         interactAction = new InputAction("Interact", binding: "<Keyboard>/e");
         interactAction.AddBinding("<Gamepad>/buttonWest");
     }
@@ -49,26 +56,19 @@ public class InteractablePanel : MonoBehaviour
         anim.SetBool(idleParam, true);
     }
  
-    private void OnEnable()
-    {
-        interactAction.Enable();
-    }
- 
-    private void OnDisable()
-    {
-        interactAction.Disable();
-    }
+    private void OnEnable()  => interactAction.Enable();
+    private void OnDisable() => interactAction.Disable();
  
     private void Update()
     {
+        // Una vez activado, el Update no hace nada más
         if (activated || player == null) return;
  
-        float distance = Vector2.Distance(transform.position, player.position);
+        // sqrMagnitude en lugar de Vector2.Distance
+        float sqrDistance = (cachedPosition - player.position).sqrMagnitude;
  
-        if (distance <= interactionRange && interactAction.WasPressedThisFrame())
-        {
+        if (sqrDistance <= sqrInteractionRange && interactAction.WasPressedThisFrame())
             Activate();
-        }
     }
  
     private void Activate()

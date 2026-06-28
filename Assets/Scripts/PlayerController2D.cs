@@ -30,8 +30,8 @@ public class PlayerController2D : MonoBehaviour
     [SerializeField] private float moveSpeed = 6f;
  
     [Header("Salto")]
-    [SerializeField] private float jumpForce = 12f;
-    [SerializeField] private float fallMultiplier = 2.5f;
+    [SerializeField] private float jumpForce       = 12f;
+    [SerializeField] private float fallMultiplier  = 2.5f;
     [SerializeField] private float lowJumpMultiplier = 2f;
  
     [Header("Detección de suelo")]
@@ -40,11 +40,11 @@ public class PlayerController2D : MonoBehaviour
     [SerializeField] private LayerMask groundLayer;
  
     [Header("Detección de pared")]
-    [SerializeField] private Transform wallCheck;       // hijo vacío al costado del pj, a la altura del pecho
+    [SerializeField] private Transform wallCheck;
     [SerializeField] private float wallCheckRadius = 0.15f;
  
     [Header("Doble Salto (Power-Up)")]
-    [SerializeField] private bool canDoubleJump = false;
+    [SerializeField] private bool canDoubleJump   = false;
     [SerializeField] private float doubleJumpForce = 10f;
  
     [Header("Flip")]
@@ -70,7 +70,22 @@ public class PlayerController2D : MonoBehaviour
     private bool jumpPressed;
     private bool jumpHeld;
  
-    // Nombres de parámetros del Animator
+    // ── Caché para evitar writes innecesarios al Animator ──
+    private bool  cachedIsWalking;
+    private bool  cachedIsGrounded;
+    private float cachedYVelocity;
+ 
+    // ── Caché para evitar flip innecesario ──
+    private float lastFacingDirection = 1f; // 1 = derecha, -1 = izquierda
+ 
+    // ── Caché para evitar recalcular multiplicadores cada FixedUpdate ──
+    private float fallExtra;     // gravity.y * (fallMultiplier - 1)
+    private float lowJumpExtra;  // gravity.y * (lowJumpMultiplier - 1)
+ 
+    // ── Caché de la dirección del wallCheck ──
+    private float wallCheckSide; // 1 = derecha, -1 = izquierda
+ 
+    // Parámetros del Animator
     private const string ParamIsWalking       = "isWalking";
     private const string ParamIsGrounded      = "isGrounded";
     private const string ParamIsDoubleJumping = "isDoubleJumping";
@@ -86,6 +101,14 @@ public class PlayerController2D : MonoBehaviour
         rb             = GetComponent<Rigidbody2D>();
         anim           = GetComponent<Animator>();
         spriteRenderer = GetComponent<SpriteRenderer>();
+ 
+        // Precalcular multiplicadores de salto (solo se calculan una vez)
+        fallExtra    = Physics2D.gravity.y * (fallMultiplier    - 1);
+        lowJumpExtra = Physics2D.gravity.y * (lowJumpMultiplier - 1);
+ 
+        // Cachear la dirección del wallCheck
+        if (wallCheck != null)
+            wallCheckSide = wallCheck.localPosition.x > 0 ? 1f : -1f;
     }
  
     private void Update()
@@ -137,13 +160,10 @@ public class PlayerController2D : MonoBehaviour
  
     private void Move()
     {
-        // Si está en el aire tocando una pared y empuja hacia ella, bloquear movimiento horizontal
+        // Usa wallCheckSide cacheado en lugar de leer localPosition cada frame
         if (!isGrounded && isTouchingWall && horizontalInput != 0)
         {
-            // Detectar si está empujando hacia la pared comparando la dirección del input
-            // con la dirección en que mira el wallCheck respecto al personaje
-            float wallDirection = wallCheck.localPosition.x > 0 ? 1f : -1f;
-            if (Mathf.Sign(horizontalInput) == wallDirection)
+            if (Mathf.Sign(horizontalInput) == wallCheckSide)
             {
                 rb.linearVelocity = new Vector2(0f, rb.linearVelocity.y);
                 return;
@@ -183,13 +203,17 @@ public class PlayerController2D : MonoBehaviour
  
     private void ApplyBetterJumpPhysics()
     {
-        if (rb.linearVelocity.y < 0)
+        float vy = rb.linearVelocity.y;
+ 
+        if (vy < 0)
         {
-            rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (fallMultiplier - 1) * Time.fixedDeltaTime;
+            // Usa fallExtra precalculado en Awake
+            rb.linearVelocity += Vector2.up * fallExtra * Time.fixedDeltaTime;
         }
-        else if (rb.linearVelocity.y > 0 && !jumpHeld)
+        else if (vy > 0 && !jumpHeld)
         {
-            rb.linearVelocity += Vector2.up * Physics2D.gravity.y * (lowJumpMultiplier - 1) * Time.fixedDeltaTime;
+            // Usa lowJumpExtra precalculado en Awake
+            rb.linearVelocity += Vector2.up * lowJumpExtra * Time.fixedDeltaTime;
         }
     }
  
@@ -220,23 +244,30 @@ public class PlayerController2D : MonoBehaviour
     {
         if (horizontalInput == 0) return;
  
+        float direction = horizontalInput < 0 ? -1f : 1f;
+ 
+        // Solo aplicar flip si la dirección realmente cambió
+        if (direction == lastFacingDirection) return;
+        lastFacingDirection = direction;
+ 
         if (useSpriteFlip && spriteRenderer != null)
         {
-            spriteRenderer.flipX = horizontalInput < 0;
+            spriteRenderer.flipX = direction < 0;
         }
         else
         {
             Vector3 scale = transform.localScale;
-            scale.x = Mathf.Abs(scale.x) * (horizontalInput < 0 ? -1 : 1);
+            scale.x = Mathf.Abs(scale.x) * direction;
             transform.localScale = scale;
         }
  
-        // Actualizar la posición del wallCheck según la dirección
+        // Actualizar wallCheck y su caché
         if (wallCheck != null)
         {
             Vector3 pos = wallCheck.localPosition;
-            pos.x = Mathf.Abs(pos.x) * (horizontalInput < 0 ? -1 : 1);
+            pos.x = Mathf.Abs(pos.x) * direction;
             wallCheck.localPosition = pos;
+            wallCheckSide = direction; // actualizar caché
         }
     }
  
@@ -246,9 +277,28 @@ public class PlayerController2D : MonoBehaviour
  
     private void UpdateAnimator()
     {
-        anim.SetBool(ParamIsWalking,  horizontalInput != 0 && isGrounded);
-        anim.SetBool(ParamIsGrounded, isGrounded);
-        anim.SetFloat(ParamYVelocity, rb.linearVelocity.y);
+        bool  isWalking = horizontalInput != 0 && isGrounded;
+        float yVelocity = rb.linearVelocity.y;
+ 
+        // Solo llamar SetBool/SetFloat si el valor realmente cambió
+        if (isWalking != cachedIsWalking)
+        {
+            anim.SetBool(ParamIsWalking, isWalking);
+            cachedIsWalking = isWalking;
+        }
+ 
+        if (isGrounded != cachedIsGrounded)
+        {
+            anim.SetBool(ParamIsGrounded, isGrounded);
+            cachedIsGrounded = isGrounded;
+        }
+ 
+        // Para el float usamos una tolerancia pequeña para evitar updates por micro-variaciones
+        if (Mathf.Abs(yVelocity - cachedYVelocity) > 0.01f)
+        {
+            anim.SetFloat(ParamYVelocity, yVelocity);
+            cachedYVelocity = yVelocity;
+        }
     }
  
     // ─────────────────────────────────────────
@@ -265,7 +315,6 @@ public class PlayerController2D : MonoBehaviour
  
         anim.SetBool(ParamIsDead, true);
  
-        // Avisar al RespawnManager para que inicie el respawn con delay
         if (RespawnManager.Instance != null)
             RespawnManager.Instance.StartRespawn();
         else
@@ -276,10 +325,6 @@ public class PlayerController2D : MonoBehaviour
     //  RESPAWN
     // ─────────────────────────────────────────
  
-    /// <summary>
-    /// Llamado por RespawnManager cuando termina el delay de muerte.
-    /// Resetea todo el estado del personaje.
-    /// </summary>
     public void Respawn()
     {
         isDead          = false;
@@ -289,14 +334,19 @@ public class PlayerController2D : MonoBehaviour
         jumpHeld        = false;
         horizontalInput = 0f;
  
+        // Resetear cachés para que UpdateAnimator vuelva a escribir los valores
+        cachedIsWalking  = true;  // forzar diferencia en el próximo Update
+        cachedIsGrounded = true;
+        cachedYVelocity  = float.MaxValue;
+ 
         rb.bodyType       = RigidbodyType2D.Dynamic;
         rb.linearVelocity = Vector2.zero;
  
-        // Resetear el Animator
         anim.SetBool(ParamIsDead,     false);
         anim.SetBool(ParamIsWalking,  false);
         anim.SetBool(ParamIsGrounded, false);
-        anim.Play("Idle"); // el nombre debe coincidir exactamente con tu estado Idle en el Animator
+        anim.Play("Idle-character", 0, 0f);
+        anim.Update(0f);
     }
  
     // ─────────────────────────────────────────
@@ -307,7 +357,6 @@ public class PlayerController2D : MonoBehaviour
     {
         canDoubleJump = true;
         hasDoubleJump = !isGrounded;
-        Debug.Log("¡Doble salto desbloqueado!");
     }
  
     public void DisableDoubleJump()
