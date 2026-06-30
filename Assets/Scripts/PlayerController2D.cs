@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
  
@@ -10,12 +11,13 @@ using UnityEngine.InputSystem;
 ///   - isWalking        (bool)
 ///   - isGrounded       (bool)
 ///   - isDoubleJumping  (trigger)
+///   - isDashing        (trigger)
 ///   - isDead           (bool)
-///   - yVelocity        (float) → opcional
+///   - yVelocity        (float)
 ///
 /// En el componente PlayerInput:
 ///   - Behavior: Send Messages
-///   - Actions: Move (Value, Vector2) y Jump (Button)
+///   - Actions: Move (Value, Vector2), Jump (Button), Dash (Button)
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 [RequireComponent(typeof(Animator))]
@@ -30,8 +32,8 @@ public class PlayerController2D : MonoBehaviour
     [SerializeField] private float moveSpeed = 6f;
  
     [Header("Salto")]
-    [SerializeField] private float jumpForce       = 12f;
-    [SerializeField] private float fallMultiplier  = 2.5f;
+    [SerializeField] private float jumpForce         = 12f;
+    [SerializeField] private float fallMultiplier    = 2.5f;
     [SerializeField] private float lowJumpMultiplier = 2f;
  
     [Header("Detección de suelo")]
@@ -44,8 +46,14 @@ public class PlayerController2D : MonoBehaviour
     [SerializeField] private float wallCheckRadius = 0.15f;
  
     [Header("Doble Salto (Power-Up)")]
-    [SerializeField] private bool canDoubleJump   = false;
+    [SerializeField] private bool canDoubleJump    = false;
     [SerializeField] private float doubleJumpForce = 10f;
+ 
+    [Header("Dash (Power-Up)")]
+    [SerializeField] private bool canDash       = false;
+    [SerializeField] private float dashForce    = 18f;
+    [SerializeField] private float dashDuration = 0.15f;   // duración del impulso
+    [SerializeField] private float dashCooldown = 1f;      // tiempo entre dashes
  
     [Header("Flip")]
     [SerializeField] private bool useSpriteFlip = true;
@@ -70,25 +78,31 @@ public class PlayerController2D : MonoBehaviour
     private bool jumpPressed;
     private bool jumpHeld;
  
-    // ── Caché para evitar writes innecesarios al Animator ──
+    // ── Dash ──
+    private bool dashPressed;
+    private bool isDashing;
+    private float dashCooldownTimer;   // tiempo restante de cooldown
+ 
+    // ── Caché Animator ──
     private bool  cachedIsWalking;
     private bool  cachedIsGrounded;
     private float cachedYVelocity;
  
-    // ── Caché para evitar flip innecesario ──
-    private float lastFacingDirection = 1f; // 1 = derecha, -1 = izquierda
+    // ── Caché flip ──
+    private float lastFacingDirection = 1f;
  
-    // ── Caché para evitar recalcular multiplicadores cada FixedUpdate ──
-    private float fallExtra;     // gravity.y * (fallMultiplier - 1)
-    private float lowJumpExtra;  // gravity.y * (lowJumpMultiplier - 1)
+    // ── Caché física de salto ──
+    private float fallExtra;
+    private float lowJumpExtra;
  
-    // ── Caché de la dirección del wallCheck ──
-    private float wallCheckSide; // 1 = derecha, -1 = izquierda
+    // ── Caché wallCheck ──
+    private float wallCheckSide;
  
     // Parámetros del Animator
     private const string ParamIsWalking       = "isWalking";
     private const string ParamIsGrounded      = "isGrounded";
     private const string ParamIsDoubleJumping = "isDoubleJumping";
+    private const string ParamIsDashing       = "isDashing";
     private const string ParamIsDead          = "isDead";
     private const string ParamYVelocity       = "yVelocity";
  
@@ -102,11 +116,9 @@ public class PlayerController2D : MonoBehaviour
         anim           = GetComponent<Animator>();
         spriteRenderer = GetComponent<SpriteRenderer>();
  
-        // Precalcular multiplicadores de salto (solo se calculan una vez)
         fallExtra    = Physics2D.gravity.y * (fallMultiplier    - 1);
         lowJumpExtra = Physics2D.gravity.y * (lowJumpMultiplier - 1);
  
-        // Cachear la dirección del wallCheck
         if (wallCheck != null)
             wallCheckSide = wallCheck.localPosition.x > 0 ? 1f : -1f;
     }
@@ -115,14 +127,19 @@ public class PlayerController2D : MonoBehaviour
     {
         if (isDead) return;
  
+        // Reducir el timer de cooldown del dash
+        if (dashCooldownTimer > 0f)
+            dashCooldownTimer -= Time.deltaTime;
+ 
         HandleJump();
+        HandleDash();
         FlipSprite();
         UpdateAnimator();
     }
  
     private void FixedUpdate()
     {
-        if (isDead) return;
+        if (isDead || isDashing) return;  // durante el dash no aplicar movimiento normal
  
         CheckGround();
         CheckWall();
@@ -154,13 +171,19 @@ public class PlayerController2D : MonoBehaviour
         }
     }
  
+    private void OnDash(InputValue value)
+    {
+        if (isDead) return;
+        if (value.isPressed)
+            dashPressed = true;
+    }
+ 
     // ─────────────────────────────────────────
     //  MOVIMIENTO
     // ─────────────────────────────────────────
  
     private void Move()
     {
-        // Usa wallCheckSide cacheado en lugar de leer localPosition cada frame
         if (!isGrounded && isTouchingWall && horizontalInput != 0)
         {
             if (Mathf.Sign(horizontalInput) == wallCheckSide)
@@ -185,6 +208,7 @@ public class PlayerController2D : MonoBehaviour
         if (isGrounded)
         {
             Jump(jumpForce);
+            SoundManager.Instance?.PlayJump();
             if (canDoubleJump)
                 hasDoubleJump = true;
         }
@@ -193,6 +217,7 @@ public class PlayerController2D : MonoBehaviour
             Jump(doubleJumpForce);
             hasDoubleJump = false;
             anim.SetTrigger(ParamIsDoubleJumping);
+            SoundManager.Instance?.PlayJump();
         }
     }
  
@@ -206,15 +231,53 @@ public class PlayerController2D : MonoBehaviour
         float vy = rb.linearVelocity.y;
  
         if (vy < 0)
-        {
-            // Usa fallExtra precalculado en Awake
             rb.linearVelocity += Vector2.up * fallExtra * Time.fixedDeltaTime;
-        }
         else if (vy > 0 && !jumpHeld)
-        {
-            // Usa lowJumpExtra precalculado en Awake
             rb.linearVelocity += Vector2.up * lowJumpExtra * Time.fixedDeltaTime;
-        }
+    }
+ 
+    // ─────────────────────────────────────────
+    //  DASH
+    // ─────────────────────────────────────────
+ 
+    private void HandleDash()
+    {
+        if (!dashPressed) return;
+        dashPressed = false;
+ 
+        if (!canDash || isDashing || dashCooldownTimer > 0f) return;
+ 
+        // Si no hay input, usa la dirección que mira el personaje
+        float direction = horizontalInput != 0 ? Mathf.Sign(horizontalInput) : lastFacingDirection;
+ 
+        StartCoroutine(DashRoutine(direction));
+    }
+ 
+    private IEnumerator DashRoutine(float direction)
+    {
+        isDashing         = true;
+        dashCooldownTimer = dashCooldown;
+ 
+        // Trigger de animación
+        anim.SetTrigger(ParamIsDashing);
+ 
+        // Sonido de dash
+        SoundManager.Instance?.PlayDash();
+ 
+        // Guardar y neutralizar la gravedad durante el dash
+        float originalGravity = rb.gravityScale;
+        rb.gravityScale       = 0f;
+ 
+        // Aplicar impulso horizontal
+        rb.linearVelocity = new Vector2(direction * dashForce, 0f);
+ 
+        yield return new WaitForSeconds(dashDuration);
+ 
+        // Restaurar gravedad y detener el impulso
+        rb.gravityScale   = originalGravity;
+        rb.linearVelocity = new Vector2(0f, rb.linearVelocity.y);
+ 
+        isDashing = false;
     }
  
     // ─────────────────────────────────────────
@@ -242,18 +305,15 @@ public class PlayerController2D : MonoBehaviour
  
     private void FlipSprite()
     {
-        if (horizontalInput == 0) return;
+        if (horizontalInput == 0 || isDashing) return;
  
         float direction = horizontalInput < 0 ? -1f : 1f;
  
-        // Solo aplicar flip si la dirección realmente cambió
         if (direction == lastFacingDirection) return;
         lastFacingDirection = direction;
  
         if (useSpriteFlip && spriteRenderer != null)
-        {
             spriteRenderer.flipX = direction < 0;
-        }
         else
         {
             Vector3 scale = transform.localScale;
@@ -261,13 +321,12 @@ public class PlayerController2D : MonoBehaviour
             transform.localScale = scale;
         }
  
-        // Actualizar wallCheck y su caché
         if (wallCheck != null)
         {
             Vector3 pos = wallCheck.localPosition;
             pos.x = Mathf.Abs(pos.x) * direction;
             wallCheck.localPosition = pos;
-            wallCheckSide = direction; // actualizar caché
+            wallCheckSide = direction;
         }
     }
  
@@ -277,14 +336,19 @@ public class PlayerController2D : MonoBehaviour
  
     private void UpdateAnimator()
     {
-        bool  isWalking = horizontalInput != 0 && isGrounded;
+        bool  isWalking = horizontalInput != 0 && isGrounded && !isDashing;
         float yVelocity = rb.linearVelocity.y;
  
-        // Solo llamar SetBool/SetFloat si el valor realmente cambió
         if (isWalking != cachedIsWalking)
         {
             anim.SetBool(ParamIsWalking, isWalking);
             cachedIsWalking = isWalking;
+ 
+            // Sonido de caminata
+            if (isWalking)
+                SoundManager.Instance?.PlayWalk();
+            else
+                SoundManager.Instance?.StopWalk();
         }
  
         if (isGrounded != cachedIsGrounded)
@@ -293,7 +357,6 @@ public class PlayerController2D : MonoBehaviour
             cachedIsGrounded = isGrounded;
         }
  
-        // Para el float usamos una tolerancia pequeña para evitar updates por micro-variaciones
         if (Mathf.Abs(yVelocity - cachedYVelocity) > 0.01f)
         {
             anim.SetFloat(ParamYVelocity, yVelocity);
@@ -309,9 +372,11 @@ public class PlayerController2D : MonoBehaviour
     {
         if (isDead) return;
  
-        isDead = true;
+        isDead    = true;
+        isDashing = false;
+ 
         rb.linearVelocity = Vector2.zero;
-        rb.bodyType = RigidbodyType2D.Static;
+        rb.bodyType       = RigidbodyType2D.Static;
  
         anim.SetBool(ParamIsDead, true);
  
@@ -327,30 +392,33 @@ public class PlayerController2D : MonoBehaviour
  
     public void Respawn()
     {
-        isDead          = false;
-        isGrounded      = false;
-        hasDoubleJump   = false;
-        jumpPressed     = false;
-        jumpHeld        = false;
-        horizontalInput = 0f;
+        isDead            = false;
+        isDashing         = false;
+        isGrounded        = false;
+        hasDoubleJump     = false;
+        jumpPressed       = false;
+        jumpHeld          = false;
+        dashPressed       = false;
+        dashCooldownTimer = 0f;
+        horizontalInput   = 0f;
  
-        // Resetear cachés para que UpdateAnimator vuelva a escribir los valores
-        cachedIsWalking  = true;  // forzar diferencia en el próximo Update
+        cachedIsWalking  = true;
         cachedIsGrounded = true;
         cachedYVelocity  = float.MaxValue;
  
+        rb.gravityScale   = 1f;
         rb.bodyType       = RigidbodyType2D.Dynamic;
         rb.linearVelocity = Vector2.zero;
  
         anim.SetBool(ParamIsDead,     false);
         anim.SetBool(ParamIsWalking,  false);
         anim.SetBool(ParamIsGrounded, false);
-        anim.Play("Idle-character", 0, 0f);
+        anim.Play("Idle", 0, 0f);
         anim.Update(0f);
     }
  
     // ─────────────────────────────────────────
-    //  POWER-UP: DOBLE SALTO
+    //  POWER-UPS
     // ─────────────────────────────────────────
  
     public void EnableDoubleJump()
@@ -363,6 +431,16 @@ public class PlayerController2D : MonoBehaviour
     {
         canDoubleJump = false;
         hasDoubleJump = false;
+    }
+ 
+    public void EnableDash()
+    {
+        canDash = true;
+    }
+ 
+    public void DisableDash()
+    {
+        canDash = false;
     }
  
     // ─────────────────────────────────────────

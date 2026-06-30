@@ -3,12 +3,13 @@ using UnityEngine.InputSystem;
  
 /// <summary>
 /// Panel interactivo compatible con el nuevo Input System.
-/// Cuando el jugador está cerca y presiona la tecla de interacción,
-/// reproduce su animación de desactivado y desactiva la barrera.
+/// El fade de audio por distancia lo maneja el AudioSource en 3D (Spatial Blend = 1).
 ///
 /// El GameObject del panel necesita:
 ///   - Animator con parámetros: isIdle (bool), isDeactivated (bool)
+///   - AudioSource configurado en 3D (Spatial Blend = 1, Logarithmic Rolloff)
 /// </summary>
+[RequireComponent(typeof(AudioSource))]
 public class InteractablePanel : MonoBehaviour
 {
     [Header("Referencias")]
@@ -17,27 +18,36 @@ public class InteractablePanel : MonoBehaviour
     [Header("Interacción")]
     [SerializeField] private float interactionRange = 1.5f;
  
+    [Header("Sonido")]
+    [SerializeField] private AudioClip idleClip;
+    [SerializeField] private AudioClip activateClip;
+    [SerializeField] [Range(0f, 1f)] private float volume = 1f;
+ 
     [Header("Animator")]
     [SerializeField] private string idleParam        = "isIdle";
     [SerializeField] private string deactivatedParam = "isDeactivated";
  
     private Animator anim;
+    private AudioSource audioSource;
     private Transform player;
     private bool activated = false;
  
-    // Caché: rango al cuadrado para evitar sqrt cada frame
+    // Caché
     private float sqrInteractionRange;
- 
-    // Caché: posición del panel (no se mueve)
     private Vector3 cachedPosition;
  
     private InputAction interactAction;
  
     private void Awake()
     {
-        anim = GetComponent<Animator>();
+        anim        = GetComponent<Animator>();
+        audioSource = GetComponent<AudioSource>();
  
-        // Precalcular rango al cuadrado una sola vez
+        // El rolloff y spatial blend se configuran en el Inspector del AudioSource
+        audioSource.loop        = true;
+        audioSource.playOnAwake = false;
+        audioSource.volume      = volume;
+ 
         sqrInteractionRange = interactionRange * interactionRange;
         cachedPosition      = transform.position;
  
@@ -54,6 +64,13 @@ public class InteractablePanel : MonoBehaviour
             Debug.LogWarning("InteractablePanel: no se encontró un GameObject con tag 'Player'.");
  
         anim.SetBool(idleParam, true);
+ 
+        // Arrancar el idle — el AudioSource 3D maneja el volumen por distancia
+        if (idleClip != null)
+        {
+            audioSource.clip = idleClip;
+            audioSource.Play();
+        }
     }
  
     private void OnEnable()  => interactAction.Enable();
@@ -61,10 +78,8 @@ public class InteractablePanel : MonoBehaviour
  
     private void Update()
     {
-        // Una vez activado, el Update no hace nada más
         if (activated || player == null) return;
  
-        // sqrMagnitude en lugar de Vector2.Distance
         float sqrDistance = (cachedPosition - player.position).sqrMagnitude;
  
         if (sqrDistance <= sqrInteractionRange && interactAction.WasPressedThisFrame())
@@ -74,6 +89,12 @@ public class InteractablePanel : MonoBehaviour
     private void Activate()
     {
         activated = true;
+ 
+        // Detener idle y reproducir sonido de activación
+        audioSource.Stop();
+        audioSource.loop = false;
+        if (activateClip != null)
+            audioSource.PlayOneShot(activateClip, volume);
  
         anim.SetBool(idleParam, false);
         anim.SetBool(deactivatedParam, true);
@@ -90,4 +111,3 @@ public class InteractablePanel : MonoBehaviour
         Gizmos.DrawWireSphere(transform.position, interactionRange);
     }
 }
-
