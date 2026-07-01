@@ -1,13 +1,17 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Rendering.Universal;
+using System.Collections;
  
 /// <summary>
 /// Panel interactivo compatible con el nuevo Input System.
 /// El fade de audio por distancia lo maneja el AudioSource en 3D (Spatial Blend = 1).
+/// La luz cambia de color al activarse con un fade suave.
 ///
 /// El GameObject del panel necesita:
 ///   - Animator con parámetros: isIdle (bool), isDeactivated (bool)
 ///   - AudioSource configurado en 3D (Spatial Blend = 1, Logarithmic Rolloff)
+///   - Light 2D en un hijo llamado "Light" (o asignado en el Inspector)
 /// </summary>
 [RequireComponent(typeof(AudioSource))]
 public class InteractablePanel : MonoBehaviour
@@ -22,6 +26,12 @@ public class InteractablePanel : MonoBehaviour
     [SerializeField] private AudioClip idleClip;
     [SerializeField] private AudioClip activateClip;
     [SerializeField] [Range(0f, 1f)] private float volume = 1f;
+ 
+    [Header("Luz")]
+    [SerializeField] private Light2D panelLight;
+    [SerializeField] private Color idleColor      = Color.red;
+    [SerializeField] private Color activatedColor = Color.cyan;
+    [SerializeField] private float colorFadeDuration = 0.5f;
  
     [Header("Animator")]
     [SerializeField] private string idleParam        = "isIdle";
@@ -43,7 +53,6 @@ public class InteractablePanel : MonoBehaviour
         anim        = GetComponent<Animator>();
         audioSource = GetComponent<AudioSource>();
  
-        // El rolloff y spatial blend se configuran en el Inspector del AudioSource
         audioSource.loop        = true;
         audioSource.playOnAwake = false;
         audioSource.volume      = volume;
@@ -65,7 +74,10 @@ public class InteractablePanel : MonoBehaviour
  
         anim.SetBool(idleParam, true);
  
-        // Arrancar el idle — el AudioSource 3D maneja el volumen por distancia
+        // Aplicar color inicial a la luz
+        if (panelLight != null)
+            panelLight.color = idleColor;
+ 
         if (idleClip != null)
         {
             audioSource.clip = idleClip;
@@ -90,7 +102,6 @@ public class InteractablePanel : MonoBehaviour
     {
         activated = true;
  
-        // Detener idle y reproducir sonido de activación
         audioSource.Stop();
         audioSource.loop = false;
         if (activateClip != null)
@@ -99,10 +110,28 @@ public class InteractablePanel : MonoBehaviour
         anim.SetBool(idleParam, false);
         anim.SetBool(deactivatedParam, true);
  
+        // Fade de color en la luz
+        if (panelLight != null)
+            StartCoroutine(FadeLightColor(idleColor, activatedColor, colorFadeDuration));
+ 
         if (barrier != null)
             barrier.Deactivate();
         else
             Debug.LogWarning("InteractablePanel: no hay ninguna barrera asignada.");
+    }
+ 
+    private IEnumerator FadeLightColor(Color from, Color to, float duration)
+    {
+        float elapsed = 0f;
+ 
+        while (elapsed < duration)
+        {
+            elapsed         += Time.deltaTime;
+            panelLight.color = Color.Lerp(from, to, elapsed / duration);
+            yield return null;
+        }
+ 
+        panelLight.color = to;
     }
  
     private void OnDrawGizmosSelected()

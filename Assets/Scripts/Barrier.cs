@@ -77,3 +77,4 @@ public class Barrier : MonoBehaviour
         gameObject.SetActive(false);
     }
 }
+ 

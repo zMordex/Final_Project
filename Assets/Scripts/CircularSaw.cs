@@ -3,16 +3,20 @@ using UnityEngine;
 /// <summary>
 /// Sierra circular que se mueve en ida y vuelta en cualquier dirección,
 /// incluyendo diagonal con ángulo graduable.
+/// El audio espacial 3D lo maneja el AudioSource (Spatial Blend = 1).
 ///
 /// Configuración en el Inspector:
 ///   - Move Distance  → distancia total que recorre desde su posición inicial
 ///   - Move Speed     → velocidad de movimiento
 ///   - Angle          → ángulo en grados (0 = derecha, 90 = arriba, 45 = diagonal)
+///   - Saw Clip       → sonido en loop de la sierra (ej: sonido de motor/corte)
 ///
 /// El GameObject necesita:
 ///   - Collider2D con Is Trigger: ON
+///   - AudioSource configurado en 3D (Spatial Blend = 1, Logarithmic Rolloff)
 ///   - El personaje debe tener el tag "Player"
 /// </summary>
+[RequireComponent(typeof(AudioSource))]
 public class CircularSaw : MonoBehaviour
 {
     [Header("Movimiento")]
@@ -27,30 +31,46 @@ public class CircularSaw : MonoBehaviour
     // 45°  = diagonal arriba-derecha
     // 135° = diagonal arriba-izquierda
  
+    [Header("Sonido")]
+    [SerializeField] private AudioClip sawClip;
+    [SerializeField] [Range(0f, 1f)] private float volume = 1f;
+ 
     private Vector3 startPosition;
     private Vector3 endPosition;
     private bool goingForward = true;
+    private AudioSource audioSource;
  
     // Caché: umbral al cuadrado para evitar sqrt en el chequeo de llegada
     private const float ArrivalThresholdSqr = 0.01f * 0.01f;
  
+    private void Awake()
+    {
+        audioSource             = GetComponent<AudioSource>();
+        audioSource.loop        = true;
+        audioSource.playOnAwake = false;
+        audioSource.volume      = volume;
+    }
+ 
     private void Start()
     {
         startPosition = transform.position;
+        endPosition   = startPosition + DirectionFromAngle() * moveDistance;
  
-        // DirectionFromAngle se llama una sola vez en Start, no cada frame
-        endPosition = startPosition + DirectionFromAngle() * moveDistance;
+        // Arrancar el sonido en loop — el rolloff 3D maneja el volumen por distancia
+        if (sawClip != null)
+        {
+            audioSource.clip = sawClip;
+            audioSource.Play();
+        }
     }
  
     private void Update()
     {
         Vector3 target = goingForward ? endPosition : startPosition;
  
-        // Cachear moveSpeed * deltaTime para no multiplicarlo dos veces
         float step = moveSpeed * Time.deltaTime;
         transform.position = Vector3.MoveTowards(transform.position, target, step);
  
-        // sqrMagnitude en lugar de Vector3.Distance (evita raíz cuadrada)
         if ((transform.position - target).sqrMagnitude < ArrivalThresholdSqr)
             goingForward = !goingForward;
     }
@@ -64,17 +84,12 @@ public class CircularSaw : MonoBehaviour
             player.Die();
     }
  
-    /// <summary>
-    /// Convierte el ángulo en grados a un vector de dirección normalizado.
-    /// Solo se llama en Start y en OnDrawGizmos (editor), nunca en Update.
-    /// </summary>
     private Vector3 DirectionFromAngle()
     {
         float rad = angle * Mathf.Deg2Rad;
         return new Vector3(Mathf.Cos(rad), Mathf.Sin(rad), 0f);
     }
  
-    // Dibuja el recorrido en el editor
     private void OnDrawGizmos()
     {
         Vector3 origin    = Application.isPlaying ? startPosition : transform.position;
