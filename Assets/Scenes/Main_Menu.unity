@@ -1277,6 +1277,8 @@ MonoBehaviour:
     clip: {fileID: 8300000, guid: 6626afbfee075a943b471ecab0ad3bde, type: 3}
   - sceneName: First_Level
     clip: {fileID: 8300000, guid: aed51a76f5ab9dd45a4d499aa8222239, type: 3}
+  - sceneName: Second_Level
+    clip: {fileID: 8300000, guid: 2a3c39ac443ac014cb63d487d2eecdec, type: 3}
   fadeDuration: 1
   volume: 0.5
 --- !u!82 &1952390852

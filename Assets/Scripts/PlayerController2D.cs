@@ -52,8 +52,7 @@ public class PlayerController2D : MonoBehaviour
     [Header("Dash (Power-Up)")]
     [SerializeField] private bool canDash       = false;
     [SerializeField] private float dashForce    = 18f;
-    [SerializeField] private float dashDuration = 0.15f;   // duración del impulso
-    [SerializeField] private float dashCooldown = 1f;      // tiempo entre dashes
+    [SerializeField] private float dashDuration = 0.15f;
  
     [Header("Flip")]
     [SerializeField] private bool useSpriteFlip = true;
@@ -81,7 +80,7 @@ public class PlayerController2D : MonoBehaviour
     // ── Dash ──
     private bool dashPressed;
     private bool isDashing;
-    private float dashCooldownTimer;   // tiempo restante de cooldown
+    private bool hasAerialDash;        // se recarga al tocar el suelo
  
     // ── Caché Animator ──
     private bool  cachedIsWalking;
@@ -127,10 +126,6 @@ public class PlayerController2D : MonoBehaviour
     {
         if (isDead) return;
  
-        // Reducir el timer de cooldown del dash
-        if (dashCooldownTimer > 0f)
-            dashCooldownTimer -= Time.deltaTime;
- 
         HandleJump();
         HandleDash();
         FlipSprite();
@@ -153,7 +148,8 @@ public class PlayerController2D : MonoBehaviour
  
     private void OnMove(InputValue value)
     {
-        horizontalInput = value.Get<Vector2>().x;
+        Vector2 input   = value.Get<Vector2>();
+        horizontalInput = input.x;
     }
  
     private void OnJump(InputValue value)
@@ -245,35 +241,31 @@ public class PlayerController2D : MonoBehaviour
         if (!dashPressed) return;
         dashPressed = false;
  
-        if (!canDash || isDashing || dashCooldownTimer > 0f) return;
+        if (!canDash || isDashing) return;
  
-        // Si no hay input, usa la dirección que mira el personaje
+        // Solo se puede hacer dash si está en el suelo O si tiene el dash aéreo disponible
+        if (!isGrounded && !hasAerialDash) return;
+ 
         float direction = horizontalInput != 0 ? Mathf.Sign(horizontalInput) : lastFacingDirection;
+ 
+        // Consumir el dash aéreo si está en el aire
+        if (!isGrounded) hasAerialDash = false;
  
         StartCoroutine(DashRoutine(direction));
     }
  
     private IEnumerator DashRoutine(float direction)
     {
-        isDashing         = true;
-        dashCooldownTimer = dashCooldown;
+        isDashing = true;
  
-        // Trigger de animación
-        anim.SetTrigger(ParamIsDashing);
- 
-        // Sonido de dash
         SoundManager.Instance?.PlayDash();
  
-        // Guardar y neutralizar la gravedad durante el dash
         float originalGravity = rb.gravityScale;
         rb.gravityScale       = 0f;
- 
-        // Aplicar impulso horizontal
-        rb.linearVelocity = new Vector2(direction * dashForce, 0f);
+        rb.linearVelocity     = new Vector2(direction * dashForce, 0f);
  
         yield return new WaitForSeconds(dashDuration);
  
-        // Restaurar gravedad y detener el impulso
         rb.gravityScale   = originalGravity;
         rb.linearVelocity = new Vector2(0f, rb.linearVelocity.y);
  
@@ -289,8 +281,11 @@ public class PlayerController2D : MonoBehaviour
         bool wasGrounded = isGrounded;
         isGrounded = Physics2D.OverlapCircle(groundCheck.position, groundCheckRadius, groundLayer);
  
-        if (!wasGrounded && isGrounded && canDoubleJump)
-            hasDoubleJump = true;
+        if (!wasGrounded && isGrounded)
+        {
+            if (canDoubleJump) hasDoubleJump = true;
+            if (canDash)       hasAerialDash = true;  // recarga el dash al tocar suelo
+        }
     }
  
     private void CheckWall()
@@ -399,7 +394,7 @@ public class PlayerController2D : MonoBehaviour
         jumpPressed       = false;
         jumpHeld          = false;
         dashPressed       = false;
-        dashCooldownTimer = 0f;
+        hasAerialDash     = false;
         horizontalInput   = 0f;
  
         cachedIsWalking  = true;
@@ -435,7 +430,8 @@ public class PlayerController2D : MonoBehaviour
  
     public void EnableDash()
     {
-        canDash = true;
+        canDash       = true;
+        hasAerialDash = isGrounded ? true : false;
     }
  
     public void DisableDash()

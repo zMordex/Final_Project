@@ -229,7 +229,7 @@ Rigidbody2D:
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_GravityScale: 1
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 6200000, guid: 373703a70358f8b408a41de116435f1a, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -275,7 +275,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController2D
   moveSpeed: 4.25
-  jumpForce: 6.5
+  jumpForce: 6.9
   fallMultiplier: 3.5
   lowJumpMultiplier: 2.5
   groundCheck: {fileID: 4631313384950220707}
@@ -286,11 +286,10 @@ MonoBehaviour:
   wallCheck: {fileID: 0}
   wallCheckRadius: 0.15
   canDoubleJump: 0
-  doubleJumpForce: 1
+  doubleJumpForce: 8
   canDash: 0
-  dashForce: 18
-  dashDuration: 0.15
-  dashCooldown: 1
+  dashForce: 10
+  dashDuration: 0.3
   useSpriteFlip: 1
 --- !u!114 &69515320519829482
 MonoBehaviour:
